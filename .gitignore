@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.manifest
+*.spec
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Data (keep structure, ignore large files)
+*.zip
+*.tar.gz
+*.pdf
+
+# Model checkpoints
+checkpoints/
+*.bin
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+
+# Logs
+logs/
+*.log
+wandb/
+runs/
+
+# Kaggle
+*.json
+!kaggle_evaluation/**/*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+*.key
+kaggle.json

@@ -1,0 +1,33 @@
+# AIMO Progress Prize 3 Dependencies
+
+# Core ML
+torch>=2.0.0
+transformers>=4.40.0
+accelerate>=0.28.0
+bitsandbytes>=0.43.0
+
+# Inference
+vllm>=0.4.0
+
+# Data
+polars>=0.20.0
+pandas>=2.0.0
+
+# Math & Symbolic
+sympy>=1.12
+latex2sympy2>=1.9.0
+antlr4-python3-runtime==4.11.0
+
+# Kaggle
+kaggle>=1.6.0
+grpcio>=1.60.0
+protobuf>=4.25.0
+
+# Fine-tuning (optional)
+peft>=0.10.0
+trl>=0.8.0
+datasets>=2.18.0
+
+# Utilities
+tqdm>=4.66.0
+python-dotenv>=1.0.0
