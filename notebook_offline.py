@@ -15,7 +15,7 @@ import polars as pl
 
 MAX_TOKENS = 3072
 TEMPERATURE = 0.7
-NUM_SAMPLES = 12
+NUM_SAMPLES = 8
 MAX_CODE_EXECUTIONS = 3  # Max code execution rounds per sample
 TIME_LIMIT_SECONDS = 4 * 3600 + 59 * 60  # 4:59:00 competition limit
 
