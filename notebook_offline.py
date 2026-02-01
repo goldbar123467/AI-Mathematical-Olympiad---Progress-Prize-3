@@ -3,9 +3,18 @@ import re
 import io
 import sys
 import time
+import signal
 import torch
 from collections import Counter
 from contextlib import redirect_stdout
+
+
+class CodeTimeout(Exception):
+    pass
+
+
+def timeout_handler(signum, frame):
+    raise CodeTimeout()
 
 START_TIME = time.time()
 
@@ -99,8 +108,8 @@ def extract_code_blocks(text: str) -> list[str]:
     return blocks
 
 
-def execute_code(code: str, timeout: float = 5.0) -> str:
-    """Execute Python code and return output."""
+def execute_code(code: str, timeout: int = 5) -> str:
+    """Execute Python code with timeout and return output."""
     namespace = {
         '__builtins__': __builtins__,
         'math': __import__('math'),
@@ -111,22 +120,27 @@ def execute_code(code: str, timeout: float = 5.0) -> str:
         'decimal': __import__('decimal'),
         'collections': __import__('collections'),
         'random': __import__('random'),
-        'sympy': None,  # Will try to import
+        'sympy': None,
     }
 
-    # Try to import sympy if available
     try:
         namespace['sympy'] = __import__('sympy')
     except ImportError:
         pass
 
     output = io.StringIO()
+
+    # Set timeout
+    old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(timeout)
+
     try:
         with redirect_stdout(output):
             exec(code, namespace)
+        signal.alarm(0)  # Cancel alarm
+
         result = output.getvalue().strip()
 
-        # Check for result/answer variables if no print output
         if not result:
             for var in ['result', 'answer', 'ans', 'res']:
                 if var in namespace and namespace[var] is not None:
@@ -134,8 +148,13 @@ def execute_code(code: str, timeout: float = 5.0) -> str:
                     break
 
         return result if result else "(code executed, no output)"
+    except CodeTimeout:
+        return "Error: Code execution timed out (5s limit)"
     except Exception as e:
+        signal.alarm(0)
         return f"Error: {type(e).__name__}: {str(e)}"
+    finally:
+        signal.signal(signal.SIGALRM, old_handler)
 
 
 def extract_answer(response: str) -> int:
@@ -233,8 +252,9 @@ class Model:
             # Check for code blocks
             code_blocks = extract_code_blocks(response)
 
-            if not code_blocks:
-                # No code to execute, we're done
+            # Early exit if we have a boxed answer and no pending code
+            has_answer = bool(re.search(r'\\boxed\{\d+\}', response))
+            if not code_blocks or (has_answer and iteration > 0):
                 break
 
             # Execute all code blocks
