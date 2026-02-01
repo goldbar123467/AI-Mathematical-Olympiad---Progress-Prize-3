@@ -7,6 +7,7 @@ import pandas as pd
 import polars as pl
 
 MODEL_PATHS = [
+    "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-7b/V2",
     "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-7b/1",
     "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-14b/1",
     "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-32b/1",
