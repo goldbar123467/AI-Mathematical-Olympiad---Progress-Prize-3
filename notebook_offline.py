@@ -1,24 +1,69 @@
 import os
 import re
 import torch
+from collections import Counter
 
 import kaggle_evaluation.aimo_3_inference_server
 import pandas as pd
 import polars as pl
 
 MAX_TOKENS = 4096
-TEMPERATURE = 0.1
+TEMPERATURE = 0.7
+NUM_SAMPLES = 16  # Generate multiple reasoning traces, majority vote
 
-SYSTEM_PROMPT = """You are an expert mathematician solving International Mathematical Olympiad problems.
+SYSTEM_PROMPT = """You are a world-class mathematician solving International Mathematical Olympiad problems.
 
-Instructions:
-1. Read the problem carefully
-2. Think step by step, showing all reasoning
-3. Verify each step before proceeding
-4. Double-check your final answer
-5. Express your final answer as a single integer inside \\boxed{}
+## PROBLEM-SOLVING FRAMEWORK
 
-Important: The answer must be an integer between 0 and 99999."""
+### Step 1: UNDERSTAND
+- What quantities are given?
+- What is being asked?
+- What type of problem is this? (geometry, number theory, combinatorics, algebra, functional equations)
+
+### Step 2: EXPLORE
+- Try small cases or specific values
+- Look for patterns
+- Consider what techniques apply
+
+### Step 3: SOLVE
+- Execute your approach step-by-step
+- Show all calculations clearly
+- State any theorems or lemmas you use
+
+### Step 4: VERIFY
+- Check with a different method or edge case
+- Verify the answer makes sense
+- Confirm it's an integer in range [0, 99999]
+
+### Step 5: ANSWER
+- State your final answer clearly
+- Put it in \\boxed{N} format
+
+## MATH-SPECIFIC TIPS
+
+**Number Theory:**
+- For "remainder when divided by N": work in mod N throughout
+- Factor large numbers, use CRT for composite moduli
+- Check divisibility patterns
+
+**Geometry:**
+- Set up coordinates if synthetic approach is unclear
+- Use trigonometry for angles
+- Apply power of a point, radical axes
+
+**Combinatorics:**
+- Verify formula with small cases (n=1,2,3)
+- Use generating functions for complex counting
+- Check for overcounting
+
+**Algebra/Functions:**
+- Substitute special values: f(0), f(1), f(-1)
+- Look for functional equation patterns
+- Check if function is linear, multiplicative, etc.
+
+## CRITICAL
+Your final answer MUST be a single integer between 0 and 99999.
+Express it as: \\boxed{YOUR_ANSWER}"""
 
 
 def extract_answer(response: str) -> int:
@@ -68,10 +113,25 @@ class Model:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": problem}]
         prompt = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+
+        answers = []
         with torch.no_grad():
-            outputs = self._model.generate(**inputs, max_new_tokens=MAX_TOKENS, temperature=TEMPERATURE, do_sample=True, top_p=0.95, pad_token_id=self._tokenizer.eos_token_id)
-        response = self._tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
-        return extract_answer(response)
+            for _ in range(NUM_SAMPLES):
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=MAX_TOKENS,
+                    temperature=TEMPERATURE,
+                    do_sample=True,
+                    top_p=0.95,
+                    pad_token_id=self._tokenizer.eos_token_id
+                )
+                response = self._tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+                ans = extract_answer(response)
+                answers.append(ans)
+
+        # Majority vote
+        vote = Counter(answers).most_common(1)[0][0]
+        return vote
 
 
 model = Model()
