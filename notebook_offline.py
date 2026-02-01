@@ -10,7 +10,7 @@ import kaggle_evaluation.aimo_3_inference_server
 import pandas as pd
 import polars as pl
 
-MAX_TOKENS = 2048
+MAX_TOKENS = 8192  # DeepSeek-R1 models need room to "think"
 TEMPERATURE = 0.7
 NUM_SAMPLES = 8  # Reduced since TIR takes more time per sample
 MAX_CODE_EXECUTIONS = 3  # Max code execution rounds per sample
