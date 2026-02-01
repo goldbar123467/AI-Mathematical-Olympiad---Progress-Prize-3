@@ -6,12 +6,12 @@ import kaggle_evaluation.aimo_3_inference_server
 import pandas as pd
 import polars as pl
 
+# Exact path first - must have config.json to be valid
 MODEL_PATHS = [
     "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-7b/V2",
     "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-7b/1",
     "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-14b/1",
     "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-32b/1",
-    "/kaggle/input/deepseek-r1",
 ]
 
 MAX_TOKENS = 4096
@@ -48,22 +48,30 @@ def extract_answer(response: str) -> int:
 
 
 def find_model_path():
+    # Check explicit paths first (must have config.json)
     for path in MODEL_PATHS:
-        if os.path.exists(path):
+        config_path = os.path.join(path, "config.json")
+        if os.path.exists(config_path):
             print(f"Found model at: {path}")
             return path
-    print("Searching for model in /kaggle/input...")
+
+    # Search recursively for config.json
+    print("Searching for model with config.json...")
     for root, dirs, files in os.walk("/kaggle/input"):
         if "config.json" in files:
             print(f"Found model at: {root}")
             return root
-    print("Available inputs:")
-    for item in os.listdir("/kaggle/input"):
-        full_path = f"/kaggle/input/{item}"
-        print(f"  - {item}")
-        if os.path.isdir(full_path):
-            for sub in os.listdir(full_path):
-                print(f"      - {sub}")
+
+    # Show what's available for debugging
+    print("No model found. Directory structure:")
+    for root, dirs, files in os.walk("/kaggle/input"):
+        level = root.replace("/kaggle/input", "").count(os.sep)
+        indent = "  " * level
+        print(f"{indent}{os.path.basename(root)}/")
+        if level < 3:  # Don't go too deep
+            for f in files[:5]:
+                print(f"{indent}  {f}")
+
     raise FileNotFoundError("Model not found!")
 
 
