@@ -6,14 +6,6 @@ import kaggle_evaluation.aimo_3_inference_server
 import pandas as pd
 import polars as pl
 
-# Exact path first - must have config.json to be valid
-MODEL_PATHS = [
-    "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-7b/V2",
-    "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-7b/1",
-    "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-14b/1",
-    "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-32b/1",
-]
-
 MAX_TOKENS = 4096
 TEMPERATURE = 0.1
 
@@ -48,31 +40,36 @@ def extract_answer(response: str) -> int:
 
 
 def find_model_path():
-    # Check explicit paths first (must have config.json)
-    for path in MODEL_PATHS:
-        config_path = os.path.join(path, "config.json")
-        if os.path.exists(config_path):
-            print(f"Found model at: {path}")
-            return path
-
-    # Search recursively for config.json
-    print("Searching for model with config.json...")
-    for root, dirs, files in os.walk("/kaggle/input"):
-        if "config.json" in files:
-            print(f"Found model at: {root}")
-            return root
-
-    # Show what's available for debugging
-    print("No model found. Directory structure:")
+    # Print full directory tree first
+    print("=== FULL DIRECTORY STRUCTURE ===")
     for root, dirs, files in os.walk("/kaggle/input"):
         level = root.replace("/kaggle/input", "").count(os.sep)
         indent = "  " * level
         print(f"{indent}{os.path.basename(root)}/")
-        if level < 3:  # Don't go too deep
-            for f in files[:5]:
-                print(f"{indent}  {f}")
+        # Show files with config.json highlighted
+        for f in files:
+            marker = " <-- MODEL HERE" if f == "config.json" else ""
+            if level < 4:  # Show files up to 4 levels deep
+                print(f"{indent}  {f}{marker}")
+    print("=== END DIRECTORY STRUCTURE ===")
 
-    raise FileNotFoundError("Model not found!")
+    # Find deepest config.json (most specific model path)
+    model_paths = []
+    for root, dirs, files in os.walk("/kaggle/input"):
+        if "config.json" in files:
+            # Check if it looks like a model (has model files)
+            has_model_files = any(f.endswith(('.bin', '.safetensors', 'model.safetensors.index.json')) for f in files)
+            if has_model_files:
+                model_paths.append((len(root), root))
+
+    if model_paths:
+        # Sort by path length (deepest = most specific)
+        model_paths.sort(reverse=True)
+        best_path = model_paths[0][1]
+        print(f"Selected model path: {best_path}")
+        return best_path
+
+    raise FileNotFoundError("No model with config.json and model files found!")
 
 
 class Model:
