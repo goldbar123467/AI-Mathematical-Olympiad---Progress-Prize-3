@@ -1,81 +1,160 @@
 import os
 import re
+import io
+import sys
 import torch
 from collections import Counter
+from contextlib import redirect_stdout
 
 import kaggle_evaluation.aimo_3_inference_server
 import pandas as pd
 import polars as pl
 
-MAX_TOKENS = 4096
+MAX_TOKENS = 2048
 TEMPERATURE = 0.7
-NUM_SAMPLES = 16  # Generate multiple reasoning traces, majority vote
+NUM_SAMPLES = 8  # Reduced since TIR takes more time per sample
+MAX_CODE_EXECUTIONS = 3  # Max code execution rounds per sample
 
 SYSTEM_PROMPT = """You are a world-class mathematician solving International Mathematical Olympiad problems.
+
+## CRITICAL: USE PYTHON FOR CALCULATIONS
+When you need to compute anything non-trivial (modular arithmetic, large numbers, combinatorics, checking cases), write Python code in ```python blocks. The code will be executed and results returned to you.
+
+Example:
+```python
+# Calculate 2^100 mod 997
+result = pow(2, 100, 997)
+print(result)
+```
+
+DO NOT guess numerical results. ALWAYS compute them with code.
 
 ## PROBLEM-SOLVING FRAMEWORK
 
 ### Step 1: UNDERSTAND
 - What quantities are given?
 - What is being asked?
-- What type of problem is this? (geometry, number theory, combinatorics, algebra, functional equations)
+- What type of problem is this? (geometry, number theory, combinatorics, algebra)
 
-### Step 2: EXPLORE
-- Try small cases or specific values
-- Look for patterns
-- Consider what techniques apply
+### Step 2: EXPLORE WITH CODE
+- Write Python to try small cases
+- Use code to find patterns
+- Verify conjectures computationally
 
 ### Step 3: SOLVE
 - Execute your approach step-by-step
-- Show all calculations clearly
-- State any theorems or lemmas you use
+- Use Python for ALL calculations
+- State theorems you apply
 
-### Step 4: VERIFY
-- Check with a different method or edge case
-- Verify the answer makes sense
-- Confirm it's an integer in range [0, 99999]
+### Step 4: VERIFY WITH CODE
+- Write code to check your answer
+- Test edge cases
+- Confirm answer is in range [0, 99999]
 
 ### Step 5: ANSWER
-- State your final answer clearly
+- State your final answer
 - Put it in \\boxed{N} format
 
-## MATH-SPECIFIC TIPS
+## MATH CODE PATTERNS
 
-**Number Theory:**
-- For "remainder when divided by N": work in mod N throughout
-- Factor large numbers, use CRT for composite moduli
-- Check divisibility patterns
-
-**Geometry:**
-- Set up coordinates if synthetic approach is unclear
-- Use trigonometry for angles
-- Apply power of a point, radical axes
+**Modular arithmetic:**
+```python
+pow(base, exp, mod)  # Fast modular exponentiation
+```
 
 **Combinatorics:**
-- Verify formula with small cases (n=1,2,3)
-- Use generating functions for complex counting
-- Check for overcounting
+```python
+from math import comb, factorial
+comb(n, k)  # n choose k
+```
 
-**Algebra/Functions:**
-- Substitute special values: f(0), f(1), f(-1)
-- Look for functional equation patterns
-- Check if function is linear, multiplicative, etc.
+**Number theory:**
+```python
+from math import gcd
+from functools import reduce
+def lcm(a, b): return a * b // gcd(a, b)
+```
+
+**Brute force search:**
+```python
+for n in range(1, 1000):
+    if condition(n):
+        print(n)
+        break
+```
 
 ## CRITICAL
 Your final answer MUST be a single integer between 0 and 99999.
 Express it as: \\boxed{YOUR_ANSWER}"""
 
 
+def extract_code_blocks(text: str) -> list[str]:
+    """Extract Python code blocks from model output."""
+    pattern = r'```python\n(.*?)```'
+    blocks = re.findall(pattern, text, re.DOTALL)
+    return blocks
+
+
+def execute_code(code: str, timeout: float = 5.0) -> str:
+    """Execute Python code and return output."""
+    namespace = {
+        '__builtins__': __builtins__,
+        'math': __import__('math'),
+        'cmath': __import__('cmath'),
+        'itertools': __import__('itertools'),
+        'functools': __import__('functools'),
+        'fractions': __import__('fractions'),
+        'decimal': __import__('decimal'),
+        'collections': __import__('collections'),
+        'random': __import__('random'),
+        'sympy': None,  # Will try to import
+    }
+
+    # Try to import sympy if available
+    try:
+        namespace['sympy'] = __import__('sympy')
+    except ImportError:
+        pass
+
+    output = io.StringIO()
+    try:
+        with redirect_stdout(output):
+            exec(code, namespace)
+        result = output.getvalue().strip()
+
+        # Check for result/answer variables if no print output
+        if not result:
+            for var in ['result', 'answer', 'ans', 'res']:
+                if var in namespace and namespace[var] is not None:
+                    result = str(namespace[var])
+                    break
+
+        return result if result else "(code executed, no output)"
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {str(e)}"
+
+
 def extract_answer(response: str) -> int:
+    """Extract final numerical answer from response."""
+    # Try \boxed{N} first
     boxed_pattern = r'\\boxed\{(\d+)\}'
     matches = re.findall(boxed_pattern, response)
     if matches:
         return int(matches[-1]) % 100000
-    patterns = [r'[Aa]nswer[:\s]+(\d+)', r'[Ff]inal[:\s]+(\d+)', r'\*\*(\d+)\*\*', r'= (\d+)\s*$']
+
+    # Fallback patterns
+    patterns = [
+        r'[Aa]nswer[:\s]+(\d+)',
+        r'[Ff]inal[:\s]+(\d+)',
+        r'\*\*(\d+)\*\*',
+        r'= (\d+)\s*$'
+    ]
     for pattern in patterns:
         match = re.search(pattern, response, re.MULTILINE)
         if match:
             return int(match.group(1)) % 100000
+
+    # Last resort: find last number
     lines = response.strip().split('\n')
     for line in reversed(lines):
         numbers = re.findall(r'\d+', line)
@@ -103,35 +182,101 @@ class Model:
         from transformers import AutoModelForCausalLM, AutoTokenizer
         model_path = find_model_path()
         print(f"Loading {model_path}...")
-        self._tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, local_files_only=True)
-        self._model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16, device_map="auto", trust_remote_code=True, local_files_only=True)
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            model_path, trust_remote_code=True, local_files_only=True
+        )
+        self._model = AutoModelForCausalLM.from_pretrained(
+            model_path, torch_dtype=torch.float16, device_map="auto",
+            trust_remote_code=True, local_files_only=True
+        )
         print("Model loaded!")
+
+    def _generate_once(self, messages: list[dict]) -> str:
+        """Generate a single response from messages."""
+        prompt = self._tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+
+        with torch.no_grad():
+            outputs = self._model.generate(
+                **inputs,
+                max_new_tokens=MAX_TOKENS,
+                temperature=TEMPERATURE,
+                do_sample=True,
+                top_p=0.95,
+                pad_token_id=self._tokenizer.eos_token_id
+            )
+
+        response = self._tokenizer.decode(
+            outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True
+        )
+        return response
+
+    def _solve_with_tir(self, problem: str) -> tuple[str, int]:
+        """Solve problem with Tool-Integrated Reasoning (code execution)."""
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": problem}
+        ]
+
+        full_response = ""
+
+        for iteration in range(MAX_CODE_EXECUTIONS + 1):
+            response = self._generate_once(messages)
+            full_response += response
+
+            # Check for code blocks
+            code_blocks = extract_code_blocks(response)
+
+            if not code_blocks:
+                # No code to execute, we're done
+                break
+
+            # Execute all code blocks
+            results = []
+            for i, code in enumerate(code_blocks):
+                result = execute_code(code)
+                results.append(f"Code block {i+1} output:\n{result}")
+
+            execution_output = "\n\n".join(results)
+
+            # Add to conversation and continue
+            messages.append({"role": "assistant", "content": response})
+            messages.append({
+                "role": "user",
+                "content": f"Execution results:\n{execution_output}\n\nContinue solving using these results. When done, put your final answer in \\boxed{{N}} format."
+            })
+            full_response += f"\n\n[CODE EXECUTED]\n{execution_output}\n\n"
+
+        answer = extract_answer(full_response)
+        return full_response, answer
 
     def predict(self, problem: str) -> int:
         if self._model is None:
             self.load()
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": problem}]
-        prompt = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
 
         answers = []
-        with torch.no_grad():
-            for _ in range(NUM_SAMPLES):
-                outputs = self._model.generate(
-                    **inputs,
-                    max_new_tokens=MAX_TOKENS,
-                    temperature=TEMPERATURE,
-                    do_sample=True,
-                    top_p=0.95,
-                    pad_token_id=self._tokenizer.eos_token_id
-                )
-                response = self._tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
-                ans = extract_answer(response)
-                answers.append(ans)
 
-        # Majority vote
-        vote = Counter(answers).most_common(1)[0][0]
-        return vote
+        for sample_idx in range(NUM_SAMPLES):
+            try:
+                _, answer = self._solve_with_tir(problem)
+                answers.append(answer)
+            except Exception as e:
+                print(f"Sample {sample_idx} error: {e}")
+                answers.append(0)
+
+        # Majority vote with confidence tracking
+        counter = Counter(answers)
+        top_answer, top_count = counter.most_common(1)[0]
+        confidence = top_count / NUM_SAMPLES
+
+        if confidence < 0.5:
+            print(f"Low confidence ({confidence:.0%}): {dict(counter)}")
+        else:
+            print(f"Confident ({confidence:.0%}): answer={top_answer}")
+
+        return top_answer
 
 
 model = Model()
