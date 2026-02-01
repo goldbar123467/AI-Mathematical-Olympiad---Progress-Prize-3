@@ -2,18 +2,22 @@ import os
 import re
 import io
 import sys
+import time
 import torch
 from collections import Counter
 from contextlib import redirect_stdout
+
+START_TIME = time.time()
 
 import kaggle_evaluation.aimo_3_inference_server
 import pandas as pd
 import polars as pl
 
-MAX_TOKENS = 8192  # DeepSeek-R1 models need room to "think"
+MAX_TOKENS = 3072
 TEMPERATURE = 0.7
-NUM_SAMPLES = 8  # Reduced since TIR takes more time per sample
+NUM_SAMPLES = 12
 MAX_CODE_EXECUTIONS = 3  # Max code execution rounds per sample
+TIME_LIMIT_SECONDS = 4 * 3600 + 59 * 60  # 4:59:00 competition limit
 
 SYSTEM_PROMPT = """You are a world-class mathematician solving International Mathematical Olympiad problems.
 
@@ -256,9 +260,22 @@ class Model:
         if self._model is None:
             self.load()
 
+        elapsed = time.time() - START_TIME
+        remaining = TIME_LIMIT_SECONDS - elapsed
+
+        # Adaptive sampling based on time remaining
+        if remaining < 300:  # Less than 5 min left
+            num_samples = 1
+            print(f"URGENT: {remaining:.0f}s left, single sample mode")
+        elif remaining < 900:  # Less than 15 min left
+            num_samples = 4
+            print(f"WARNING: {remaining:.0f}s left, reduced to 4 samples")
+        else:
+            num_samples = NUM_SAMPLES
+
         answers = []
 
-        for sample_idx in range(NUM_SAMPLES):
+        for sample_idx in range(num_samples):
             try:
                 _, answer = self._solve_with_tir(problem)
                 answers.append(answer)
@@ -269,7 +286,7 @@ class Model:
         # Majority vote with confidence tracking
         counter = Counter(answers)
         top_answer, top_count = counter.most_common(1)[0]
-        confidence = top_count / NUM_SAMPLES
+        confidence = top_count / len(answers)
 
         if confidence < 0.5:
             print(f"Low confidence ({confidence:.0%}): {dict(counter)}")
