@@ -39,37 +39,14 @@ def extract_answer(response: str) -> int:
     return 0
 
 
+MODEL_PATH = "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-7b/2"
+
+
 def find_model_path():
-    # Print full directory tree first
-    print("=== FULL DIRECTORY STRUCTURE ===")
-    for root, dirs, files in os.walk("/kaggle/input"):
-        level = root.replace("/kaggle/input", "").count(os.sep)
-        indent = "  " * level
-        print(f"{indent}{os.path.basename(root)}/")
-        # Show files with config.json highlighted
-        for f in files:
-            marker = " <-- MODEL HERE" if f == "config.json" else ""
-            if level < 4:  # Show files up to 4 levels deep
-                print(f"{indent}  {f}{marker}")
-    print("=== END DIRECTORY STRUCTURE ===")
-
-    # Find deepest config.json (most specific model path)
-    model_paths = []
-    for root, dirs, files in os.walk("/kaggle/input"):
-        if "config.json" in files:
-            # Check if it looks like a model (has model files)
-            has_model_files = any(f.endswith(('.bin', '.safetensors', 'model.safetensors.index.json')) for f in files)
-            if has_model_files:
-                model_paths.append((len(root), root))
-
-    if model_paths:
-        # Sort by path length (deepest = most specific)
-        model_paths.sort(reverse=True)
-        best_path = model_paths[0][1]
-        print(f"Selected model path: {best_path}")
-        return best_path
-
-    raise FileNotFoundError("No model with config.json and model files found!")
+    if os.path.exists(MODEL_PATH):
+        print(f"Using model: {MODEL_PATH}")
+        return MODEL_PATH
+    raise FileNotFoundError(f"Model not found at {MODEL_PATH}")
 
 
 class Model:
