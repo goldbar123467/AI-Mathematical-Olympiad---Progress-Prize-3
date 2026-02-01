@@ -186,14 +186,32 @@ def extract_answer(response: str) -> int:
     return 0
 
 
-MODEL_PATH = "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-7b/2"
+MODEL_PATHS = [
+    "/kaggle/input/deepseek-r1/transformers/deepseek-r1-distill-qwen-7b/2",
+    "/kaggle/input/deepseek-r1/deepseek-r1-distill-qwen-7b",
+    "/kaggle/input/deepseek-r1",
+    "/kaggle/input/deepseek-ai/deepseek-r1-distill-qwen-7b",
+    "/kaggle/input/deepseek-ai-deepseek-r1/transformers/deepseek-r1-distill-qwen-7b/2",
+]
 
 
 def find_model_path():
-    if os.path.exists(MODEL_PATH):
-        print(f"Using model: {MODEL_PATH}")
-        return MODEL_PATH
-    raise FileNotFoundError(f"Model not found at {MODEL_PATH}")
+    for path in MODEL_PATHS:
+        if os.path.exists(path):
+            # Check if it has model files
+            if os.path.isfile(os.path.join(path, "config.json")):
+                print(f"Using model: {path}")
+                return path
+
+    # Debug: list what's actually available
+    print("Model not found! Searching /kaggle/input/...")
+    for root, dirs, files in os.walk("/kaggle/input"):
+        if "config.json" in files:
+            print(f"  Found model at: {root}")
+        if root.count(os.sep) - "/kaggle/input".count(os.sep) > 3:
+            break  # Don't go too deep
+
+    raise FileNotFoundError("DeepSeek model not found. Check notebook inputs.")
 
 
 class Model:
